@@ -2,13 +2,12 @@
 Unit tests for SAML response generation and cryptographic operations.
 These tests are CRITICAL as they cover security-sensitive signing operations.
 """
-import pytest
+
 import base64
-import json
-from lxml import etree
-from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from freezegun import freeze_time
+from lxml import etree
 
 
 class TestFetchCertAndKey:
@@ -42,6 +41,7 @@ class TestFetchCertAndKey:
             mock_sm.get_secret_value.side_effect = ResourceNotFoundException("Not found")
 
             from shim_saml import fetch_cert_and_key
+
             key, cert = fetch_cert_and_key("new-secret", "test.example.com")
 
             # Should have created secret
@@ -63,11 +63,10 @@ class TestFetchCertAndKey:
 
             mock_sm.exceptions.ResourceNotFoundException = ResourceNotFoundException
             mock_sm.exceptions.ResourceExistsException = ResourceExistsException
-            mock_sm.get_secret_value.return_value = {
-                "SecretString": "not-valid-json"
-            }
+            mock_sm.get_secret_value.return_value = {"SecretString": "not-valid-json"}
 
             from shim_saml import fetch_cert_and_key
+
             key, cert = fetch_cert_and_key("bad-secret", "localhost")
 
             # Should regenerate valid keypair
@@ -117,7 +116,7 @@ class TestBuildSamlResponse:
             NAMEID_FORMAT="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
             claims=sample_user_claims,
             issuer="https://idp.example.com/",
-            saml_request_b64=sample_saml_request
+            saml_request_b64=sample_saml_request,
         )
 
         result_xml = base64.b64decode(result_b64).decode()
@@ -179,9 +178,9 @@ class TestBuildSamlResponse:
         result_xml = base64.b64decode(result_b64).decode()
 
         # Should NOT contain raw script tags (should be escaped)
-        assert '<script>' not in result_xml
+        assert "<script>" not in result_xml
         # Should contain escaped version
-        assert '&lt;script&gt;' in result_xml or '&lt;' in result_xml
+        assert "&lt;script&gt;" in result_xml or "&lt;" in result_xml
 
         # XML should be valid and parseable
         root = etree.fromstring(result_xml.encode())
@@ -216,6 +215,7 @@ class TestBuildSamlResponse:
 
         # Extract IDs - they should be different (random)
         import re
+
         ids1 = re.findall(r'ID="([^"]+)"', result1_xml)
         ids2 = re.findall(r'ID="([^"]+)"', result2_xml)
 
@@ -236,7 +236,7 @@ class TestGetSamlMetadata:
             idp_entity_id="https://idp.example.com/",
             NAMEID_FORMAT="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
             secret_name="test-secret",
-            host="idp.example.com"
+            host="idp.example.com",
         )
 
         assert "EntityDescriptor" in xml
@@ -254,7 +254,7 @@ class TestGetSamlMetadata:
             idp_entity_id="https://idp.example.com/",
             NAMEID_FORMAT="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
             secret_name="test-secret",
-            host="idp.example.com"
+            host="idp.example.com",
         )
 
         assert "https://idp.example.com/login" in xml

@@ -1,21 +1,21 @@
 import json
-
 from datetime import datetime
+
 
 def jprint(d=None, *argv):
     try:
-        if type(d) != dict:
+        if not isinstance(d, dict):
             d = {"message": str(d)}
         if argv:
             if "message" not in d:
                 d["message"] = ""
             for a in argv:
-                if type(a) == dict:
+                if isinstance(a, dict):
                     d.update(a)
                 else:
                     d["message"] += " " + str(a)
             d["message"] = d["message"].strip()
-    except:
+    except Exception:
         d = {}
 
     now = datetime.utcnow()

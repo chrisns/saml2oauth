@@ -1,18 +1,18 @@
+import base64
 import json
 import os
-import boto3
-import base64
 import re
 import secrets
+from datetime import datetime, timedelta
 from html import escape as html_escape
 
-from datetime import datetime, timedelta
-from lxml import etree
-from signxml import XMLSigner, methods
+import boto3
 from cryptography import x509
-from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
+from lxml import etree
+from signxml import XMLSigner, methods
 
 from shim_utils import jprint
 
@@ -20,6 +20,7 @@ NSMAP = {
     "saml2p": "urn:oasis:names:tc:SAML:2.0:protocol",
     "saml2": "urn:oasis:names:tc:SAML:2.0:assertion",
 }
+
 
 def fetch_cert_and_key(secret_name: str, host: str):
     """
@@ -115,7 +116,7 @@ def get_saml_metadata(login_url, logout_url, idp_entity_id, NAMEID_FORMAT, secre
 
     xml = f"""<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata"
                      entityID="{idp_entity_id}">
-  <md:IDPSSODescriptor protocolSupportEnumeration="{NSMAP['saml2p']}">
+  <md:IDPSSODescriptor protocolSupportEnumeration="{NSMAP["saml2p"]}">
     <md:NameIDFormat>{NAMEID_FORMAT}</md:NameIDFormat>
     <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="{login_url}" />
     <md:SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="{logout_url}" />
@@ -135,13 +136,15 @@ def get_saml_metadata(login_url, logout_url, idp_entity_id, NAMEID_FORMAT, secre
     return xml
 
 
-def build_saml_response(idp_cert, idp_key, SP_ACS_URL, SP_ENTITY_ID, NAMEID_FORMAT, claims, issuer, saml_request_b64 = None):
+def build_saml_response(
+    idp_cert, idp_key, SP_ACS_URL, SP_ENTITY_ID, NAMEID_FORMAT, claims, issuer, saml_request_b64=None
+):
     # Extremely minimal unsigned assertion for MVP
     now = datetime.utcnow()
     expiry = now + timedelta(minutes=5)
 
     email = claims.get("email")
-    subject = claims.get("sub")
+    claims.get("sub")
 
     in_response_to_attr = ""
     if saml_request_b64:
@@ -153,32 +156,35 @@ def build_saml_response(idp_cert, idp_key, SP_ACS_URL, SP_ENTITY_ID, NAMEID_FORM
 
     attrs_xml = ""
 
+    def attr(name, value):
+        """Build a SAML attribute element with escaped value."""
+        escaped = html_escape(value)
+        return (
+            f'<saml2:Attribute Name="{name}"><saml2:AttributeValue>{escaped}</saml2:AttributeValue></saml2:Attribute>'
+        )
+
     # SECURITY: Escape all claim values to prevent XML injection
     if email:
-        email_escaped = html_escape(email)
-        attrs_xml += f'<saml2:Attribute Name="email"><saml2:AttributeValue>{email_escaped}</saml2:AttributeValue></saml2:Attribute>'
-        attrs_xml += f'<saml2:Attribute Name="mail"><saml2:AttributeValue>{email_escaped}</saml2:AttributeValue></saml2:Attribute>'
-        attrs_xml += f'<saml2:Attribute Name="https://aws.amazon.com/SAML/Attributes/RoleSessionName"><saml2:AttributeValue>{email_escaped}</saml2:AttributeValue></saml2:Attribute>'
+        attrs_xml += attr("email", email)
+        attrs_xml += attr("mail", email)
+        attrs_xml += attr("https://aws.amazon.com/SAML/Attributes/RoleSessionName", email)
 
     name = claims.get("display_name")
     if name:
-        name_escaped = html_escape(name)
-        attrs_xml += f'<saml2:Attribute Name="name"><saml2:AttributeValue>{name_escaped}</saml2:AttributeValue></saml2:Attribute>'
-        attrs_xml += f'<saml2:Attribute Name="displayName"><saml2:AttributeValue>{name_escaped}</saml2:AttributeValue></saml2:Attribute>'
+        attrs_xml += attr("name", name)
+        attrs_xml += attr("displayName", name)
 
     given_name = claims.get("given_name")
     if given_name:
-        given_name_escaped = html_escape(given_name)
-        attrs_xml += f'<saml2:Attribute Name="givenName"><saml2:AttributeValue>{given_name_escaped}</saml2:AttributeValue></saml2:Attribute>'
+        attrs_xml += attr("givenName", given_name)
 
     family_name = claims.get("family_name")
     if family_name:
-        family_name_escaped = html_escape(family_name)
-        attrs_xml += f'<saml2:Attribute Name="surname"><saml2:AttributeValue>{family_name_escaped}</saml2:AttributeValue></saml2:Attribute>'
+        attrs_xml += attr("surname", family_name)
 
     groups = claims.get("groups") or []
     if groups:
-        group_values = "".join(f'<saml2:AttributeValue>{html_escape(g)}</saml2:AttributeValue>' for g in groups)
+        group_values = "".join(f"<saml2:AttributeValue>{html_escape(g)}</saml2:AttributeValue>" for g in groups)
         attrs_xml += f'<saml2:Attribute Name="groups">{group_values}</saml2:Attribute>'
 
     # SECURITY: Use cryptographically random IDs instead of predictable timestamps
@@ -186,15 +192,15 @@ def build_saml_response(idp_cert, idp_key, SP_ACS_URL, SP_ENTITY_ID, NAMEID_FORM
     assertion_id = f"_assert_{secrets.token_urlsafe(16)}"
 
     root_assertion_xml = f"""<saml2p:Response
-    xmlns:saml2p="{NSMAP['saml2p']}"
-    xmlns:saml2="{NSMAP['saml2']}"
+    xmlns:saml2p="{NSMAP["saml2p"]}"
+    xmlns:saml2="{NSMAP["saml2"]}"
     xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
     Version="2.0">
-    <saml2:Assertion xmlns:saml2="{NSMAP['saml2']}" Version="2.0" ID="{assertion_id}" IssueInstant="{now.isoformat()}Z">
+    <saml2:Assertion xmlns:saml2="{NSMAP["saml2"]}" Version="2.0" ID="{assertion_id}" IssueInstant="{now.isoformat()}Z">
         <saml2:Issuer>{issuer}</saml2:Issuer>
         <ds:Signature Id="placeholder"></ds:Signature>
         <saml2:Subject>
-            <saml2:NameID Format="{NAMEID_FORMAT}">{html_escape(email) if email else ''}</saml2:NameID>
+            <saml2:NameID Format="{NAMEID_FORMAT}">{html_escape(email) if email else ""}</saml2:NameID>
             <saml2:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
                 <saml2:SubjectConfirmationData {in_response_to_attr}
                     NotOnOrAfter="{expiry.isoformat()}Z"
@@ -228,7 +234,7 @@ def build_saml_response(idp_cert, idp_key, SP_ACS_URL, SP_ENTITY_ID, NAMEID_FORM
         digest_algorithm="sha256",
         c14n_algorithm="http://www.w3.org/2001/10/xml-exc-c14n#",
     )
-    
+
     signed_assertion = signer.sign(
         assertion,
         key=idp_key,
@@ -236,12 +242,12 @@ def build_saml_response(idp_cert, idp_key, SP_ACS_URL, SP_ENTITY_ID, NAMEID_FORM
         reference_uri=f"#{assertion_id}",
         id_attribute="ID",
     )
-    
+
     signed_xml = etree.tostring(signed_assertion, xml_declaration=False, encoding="utf-8").decode("utf-8")
 
     response_xml = f"""<saml2p:Response
-    xmlns:saml2p="{NSMAP['saml2p']}"
-    xmlns:saml2="{NSMAP['saml2']}"
+    xmlns:saml2p="{NSMAP["saml2p"]}"
+    xmlns:saml2="{NSMAP["saml2"]}"
     xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
     Version="2.0"
     ID="{response_id}"

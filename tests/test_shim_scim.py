@@ -1,9 +1,10 @@
 """
 Unit tests for SCIM provisioning logic.
 """
+
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import patch, MagicMock, call
-import responses
 
 
 class TestEscapeScimFilterValue:
@@ -20,15 +21,15 @@ class TestEscapeScimFilterValue:
         """Should escape backslashes in filter values."""
         from shim_scim import escape_scim_filter_value
 
-        result = escape_scim_filter_value('test\\value')
-        assert result == 'test\\\\value'
+        result = escape_scim_filter_value("test\\value")
+        assert result == "test\\\\value"
 
     def test_handles_empty_string(self):
         """Should handle empty string gracefully."""
         from shim_scim import escape_scim_filter_value
 
-        result = escape_scim_filter_value('')
-        assert result == ''
+        result = escape_scim_filter_value("")
+        assert result == ""
 
     def test_handles_none(self):
         """Should handle None gracefully."""
@@ -44,7 +45,7 @@ class TestEscapeScimFilterValue:
         # Attempt to break out of filter
         malicious = 'user@example.com" or "1"="1'
         result = escape_scim_filter_value(malicious)
-        assert '"' not in result.replace('\\"', '')  # All quotes should be escaped
+        assert '"' not in result.replace('\\"', "")  # All quotes should be escaped
 
 
 class TestPushUserInfoToScim:
@@ -68,16 +69,13 @@ class TestPushUserInfoToScim:
         mock_scim_requests.post.return_value = create_response
         mock_scim_requests.patch.return_value = MagicMock(status_code=200)
 
-        result = push_user_info_to_scim(
-            "https://scim.example.com",
-            "token",
-            sample_user_claims
-        )
+        push_user_info_to_scim("https://scim.example.com", "token", sample_user_claims)
 
-        # Should have called POST, not PUT
+        # Should have called POST to /Users (may also call POST to /Groups)
         mock_scim_requests.post.assert_called()
-        call_url = str(mock_scim_requests.post.call_args)
-        assert "/Users" in call_url
+        # Check that at least one POST call was to /Users endpoint
+        users_post_found = any("/Users" in str(call) for call in mock_scim_requests.post.call_args_list)
+        assert users_post_found, f"Expected POST to /Users, got: {mock_scim_requests.post.call_args_list}"
 
     def test_updates_existing_user_when_found(self, mock_scim_requests, sample_user_claims):
         """Should PUT update when user already exists."""
@@ -86,9 +84,7 @@ class TestPushUserInfoToScim:
         # Mock search finds user
         search_response = MagicMock()
         search_response.status_code = 200
-        search_response.json.return_value = {
-            "Resources": [{"id": "existing-user-id"}]
-        }
+        search_response.json.return_value = {"Resources": [{"id": "existing-user-id"}]}
 
         # Mock update
         update_response = MagicMock()
@@ -98,11 +94,7 @@ class TestPushUserInfoToScim:
         mock_scim_requests.put.return_value = update_response
         mock_scim_requests.patch.return_value = MagicMock(status_code=200)
 
-        result = push_user_info_to_scim(
-            "https://scim.example.com",
-            "token",
-            sample_user_claims
-        )
+        push_user_info_to_scim("https://scim.example.com", "token", sample_user_claims)
 
         mock_scim_requests.put.assert_called()
         call_url = str(mock_scim_requests.put.call_args)
@@ -118,11 +110,7 @@ class TestPushUserInfoToScim:
         mock_scim_requests.get.return_value = error_response
 
         with pytest.raises(RuntimeError, match="SCIM search failed"):
-            push_user_info_to_scim(
-                "https://scim.example.com",
-                "token",
-                sample_user_claims
-            )
+            push_user_info_to_scim("https://scim.example.com", "token", sample_user_claims)
 
     def test_raises_on_missing_email(self, mock_scim_requests):
         """Should raise ValueError when claims have no email."""
@@ -131,20 +119,13 @@ class TestPushUserInfoToScim:
         claims_no_email = {"sub": "user-123", "display_name": "No Email"}
 
         with pytest.raises(ValueError, match="must have an email"):
-            push_user_info_to_scim(
-                "https://scim.example.com",
-                "token",
-                claims_no_email
-            )
+            push_user_info_to_scim("https://scim.example.com", "token", claims_no_email)
 
     def test_uses_escaped_email_in_filter(self, mock_scim_requests):
         """Should escape email in SCIM filter to prevent injection."""
         from shim_scim import push_user_info_to_scim
 
-        claims_with_injection = {
-            "sub": "user-123",
-            "email": 'user@example.com" or "1"="1'
-        }
+        claims_with_injection = {"sub": "user-123", "email": 'user@example.com" or "1"="1'}
 
         search_response = MagicMock()
         search_response.status_code = 200
@@ -157,17 +138,13 @@ class TestPushUserInfoToScim:
         mock_scim_requests.get.return_value = search_response
         mock_scim_requests.post.return_value = create_response
 
-        push_user_info_to_scim(
-            "https://scim.example.com",
-            "token",
-            claims_with_injection
-        )
+        push_user_info_to_scim("https://scim.example.com", "token", claims_with_injection)
 
         # Verify the filter URL has escaped quotes
         call_args = mock_scim_requests.get.call_args
-        url = call_args[0][0] if call_args[0] else call_args[1].get('url', '')
+        url = call_args[0][0] if call_args[0] else call_args[1].get("url", "")
         # The quotes should be escaped
-        assert '\\"' in url or '%5C%22' in url or '" or "' not in url
+        assert '\\"' in url or "%5C%22" in url or '" or "' not in url
 
 
 class TestSyncGroupsForUser:
@@ -190,12 +167,7 @@ class TestSyncGroupsForUser:
         mock_scim_requests.post.return_value = create_response
         mock_scim_requests.patch.return_value = MagicMock(status_code=200)
 
-        sync_groups_for_user(
-            "user-123",
-            ["new-group"],
-            "https://scim.example.com",
-            {"Authorization": "Bearer token"}
-        )
+        sync_groups_for_user("user-123", ["new-group"], "https://scim.example.com", {"Authorization": "Bearer token"})
 
         # Should create group
         mock_scim_requests.post.assert_called()
@@ -207,18 +179,13 @@ class TestSyncGroupsForUser:
         # Group exists
         search_response = MagicMock()
         search_response.status_code = 200
-        search_response.json.return_value = {
-            "Resources": [{"id": "existing-group-id"}]
-        }
+        search_response.json.return_value = {"Resources": [{"id": "existing-group-id"}]}
 
         mock_scim_requests.get.return_value = search_response
         mock_scim_requests.patch.return_value = MagicMock(status_code=200)
 
         sync_groups_for_user(
-            "user-123",
-            ["existing-group"],
-            "https://scim.example.com",
-            {"Authorization": "Bearer token"}
+            "user-123", ["existing-group"], "https://scim.example.com", {"Authorization": "Bearer token"}
         )
 
         mock_scim_requests.patch.assert_called()

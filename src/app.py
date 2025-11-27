@@ -1,24 +1,18 @@
+import html
 import os
 import secrets
-import json
-import time
-import hashlib
-import base64
-import re
-import html
+from datetime import timedelta
 
-from datetime import timedelta, datetime
-from flask import Flask, render_template, session, redirect, request, url_for, make_response
-from functools import wraps
 from authlib.integrations.flask_client import OAuth
+from flask import Flask, make_response, redirect, request, session, url_for
 
-from shim_utils import jprint
-from shim_saml import fetch_cert_and_key, build_saml_response, get_saml_metadata
+from shim_saml import build_saml_response, fetch_cert_and_key, get_saml_metadata
 from shim_scim import push_user_info_to_scim
+from shim_utils import jprint
 
 app = Flask(__name__)
 
-ENVIRONMENT = os.getenv('ENVIRONMENT', 'prod')
+ENVIRONMENT = os.getenv("ENVIRONMENT", "prod")
 # SECURITY: SECRET_KEY must be provided via environment for session persistence across Lambda cold starts
 # In local dev, generate a random one; in production, Terraform provides it
 FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY") or secrets.token_urlsafe(24)
@@ -48,7 +42,9 @@ app.config.update(
 CLIENT_ID = os.environ["OAUTH_CLIENT_ID"]
 CLIENT_SECRET = os.environ["OAUTH_CLIENT_SECRET"]
 
-OPENID_CONFIG_URL = os.getenv("OPENID_CONFIG_URL", f"https://sso.service.security.gov.uk/.well-known/openid-configuration?as_app={CLIENT_ID}")
+OPENID_CONFIG_URL = os.getenv(
+    "OPENID_CONFIG_URL", f"https://sso.service.security.gov.uk/.well-known/openid-configuration?as_app={CLIENT_ID}"
+)
 LOGOUT_URL = os.getenv("SIGNOUT_URL", f"https://sso.service.security.gov.uk/sign-out?from_app={CLIENT_ID}")
 
 oauth = OAuth()
@@ -67,6 +63,7 @@ NAMEID_FORMAT = os.environ.get("NAMEID_FORMAT", "urn:oasis:names:tc:SAML:1.1:nam
 
 jprint("Initiated app")
 
+
 # set no-caching on all response
 @app.after_request
 def add_no_cache_headers(response):
@@ -74,6 +71,7 @@ def add_no_cache_headers(response):
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     return response
+
 
 @app.route("/")
 def route_root():
@@ -95,7 +93,8 @@ def route_root():
         <span>IDP Entity ID: {entity_id}</span></br>
         <span>IDP Login URL: {login_url}</span></br>
         <span>IDP Callback URL: {callback_url}</span></br>
-        <a href="{logout_url if user_signed_in else login_url}">{'Logout (' + user_email + ')' if user_signed_in else 'Login'}</a></br>
+        <a href="{logout_url if user_signed_in else login_url}">\
+{"Logout (" + user_email + ")" if user_signed_in else "Login"}</a></br>
         <a href="/health/cert">SAML Certificate Health</a></br>
         <a href="/saml/cert">Download SAML Certificate</a></br>
         <a href="/saml/metadata?view=true">View SAML Metadata</a></br>
@@ -104,10 +103,12 @@ def route_root():
 </body>
 </html>"""
 
+
 @app.route("/health")
 def route_health():
     response = make_response("OK")
     return response
+
 
 @app.route("/health/cert")
 def route_health_cert():
@@ -116,10 +117,12 @@ def route_health_cert():
         return "OK"
     return "Not OK", 500
 
+
 @app.route("/logout", methods=["GET", "POST"])
 def route_logout():
     session.clear()
     return redirect(LOGOUT_URL)
+
 
 @app.route("/login", methods=["GET", "POST"])
 def route_login():
@@ -133,18 +136,15 @@ def route_login():
     if signed_in:
         return redirect(url_for("route_saml_response"))
 
-    redirect_uri = url_for('route_callback', _external=True)
+    redirect_uri = url_for("route_callback", _external=True)
     auth_redirect_uri = oauth.sso.authorize_redirect(redirect_uri)
     return auth_redirect_uri
+
 
 @app.route("/callback", methods=["GET"])
 def route_callback():
     token = oauth.sso.authorize_access_token()
-    if (
-        "userinfo" in token
-        and "email_verified" in token["userinfo"]
-        and token["userinfo"]["email_verified"]
-    ):
+    if "userinfo" in token and "email_verified" in token["userinfo"] and token["userinfo"]["email_verified"]:
         email = token["userinfo"]["email"]
         display_name = token["userinfo"].get("display_name", "")
         if not display_name:
@@ -158,7 +158,7 @@ def route_callback():
             "display_name": display_name,
             "email": email,
             "picture": picture,
-            "groups": groups
+            "groups": groups,
         }
 
         family_name = token["userinfo"].get("family_name", None)
@@ -181,6 +181,7 @@ def route_callback():
 
     return redirect(url_for("route_saml_response"))
 
+
 @app.route("/saml/response", methods=["GET"])
 def route_saml_response(signed_in=False, claims=None):
     if not signed_in:
@@ -198,14 +199,7 @@ def route_saml_response(signed_in=False, claims=None):
     relay_state = session.get("relay_state", None)
 
     saml_response = build_saml_response(
-        idp_cert,
-        idp_key,
-        SP_ACS_URL,
-        SP_ENTITY_ID,
-        NAMEID_FORMAT,
-        claims,
-        issuer,
-        saml_request_b64=saml_request_b64
+        idp_cert, idp_key, SP_ACS_URL, SP_ENTITY_ID, NAMEID_FORMAT, claims, issuer, saml_request_b64=saml_request_b64
     )
     html = build_auto_post_html(SP_ACS_URL, saml_response, relay_state=relay_state)
     return html
@@ -213,7 +207,11 @@ def route_saml_response(signed_in=False, claims=None):
 
 def build_auto_post_html(acs_url, saml_response, relay_state=None):
     # SECURITY: Escape relay_state to prevent XSS attacks
-    relay_state_html = f"""<input type="hidden" name="RelayState" value="{html.escape(relay_state)}" />""" if relay_state else ""
+    if relay_state:
+        escaped_relay = html.escape(relay_state)
+        relay_state_html = f'<input type="hidden" name="RelayState" value="{escaped_relay}" />'
+    else:
+        relay_state_html = ""
     return f"""<html>
   <body onload="document.forms[0].submit()">
     <form method="post" action="{acs_url}">
@@ -243,7 +241,9 @@ def route_saml_metadata():
     login_url = url_for("route_login", _external=True)
     logout_url = url_for("route_logout", _external=True)
 
-    xml = get_saml_metadata(login_url, logout_url, request.host_url, NAMEID_FORMAT, SAML_KEYPAIR_SECRET_NAME, request.host)
+    xml = get_saml_metadata(
+        login_url, logout_url, request.host_url, NAMEID_FORMAT, SAML_KEYPAIR_SECRET_NAME, request.host
+    )
 
     if request.args.get("view") == "true":
         escaped_xml = html.escape(xml)

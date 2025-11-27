@@ -1,10 +1,10 @@
 import traceback
-import json
 
 from apig_wsgi import make_lambda_handler
 
 from app import app
 from shim_utils import jprint
+
 
 def lambda_handler(event, context):
     """
@@ -29,8 +29,6 @@ def lambda_handler(event, context):
             }
         )
         return response
-    except Exception as e:
+    except Exception:
         jprint({"Request": event, "Response": None, "Error": traceback.format_exc()})
         return {"statusCode": 500, "body": "Error"}
-
-

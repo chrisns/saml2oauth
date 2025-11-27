@@ -2,6 +2,9 @@ import requests
 
 from shim_utils import jprint
 
+# Timeout for SCIM API requests in seconds
+SCIM_TIMEOUT = 30
+
 
 def escape_scim_filter_value(value: str) -> str:
     """
@@ -10,15 +13,12 @@ def escape_scim_filter_value(value: str) -> str:
     """
     if not value:
         return value
-    return value.replace('\\', '\\\\').replace('"', '\\"')
+    return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def push_user_info_to_scim(base_url, access_token, claims):
     base_url = base_url.rstrip("/")
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
 
     user_info = build_user_info(claims)
     email = user_info.get("emails", [{}])[0].get("value")
@@ -27,7 +27,7 @@ def push_user_info_to_scim(base_url, access_token, claims):
 
     # Look up existing user (escape email for SCIM filter injection prevention)
     search_url = f'{base_url}/Users?filter=emails.value eq "{escape_scim_filter_value(email)}"'
-    search = requests.get(search_url, headers=headers)
+    search = requests.get(search_url, headers=headers, timeout=SCIM_TIMEOUT)
 
     if search.status_code != 200:
         raise RuntimeError(f"SCIM search failed: {search.status_code} {search.text}")
@@ -42,10 +42,10 @@ def push_user_info_to_scim(base_url, access_token, claims):
         user_id = resources[0]["id"]
         user_info["id"] = user_id
         put_url = f"{base_url}/Users/{user_id}"
-        resp = requests.put(put_url, headers=headers, json=user_info)
+        resp = requests.put(put_url, headers=headers, json=user_info, timeout=SCIM_TIMEOUT)
     else:
         # User not found -> POST create
-        resp = requests.post(f"{base_url}/Users", headers=headers, json=user_info)
+        resp = requests.post(f"{base_url}/Users", headers=headers, json=user_info, timeout=SCIM_TIMEOUT)
         user_id = resp.json().get("id")
 
     groups = claims.get("groups", [])
@@ -59,7 +59,7 @@ def find_scim_group(base_url, group_name, headers):
     base_url = base_url.rstrip("/")
     # SCIM filter query by displayName (escape for SCIM filter injection prevention)
     url = f'{base_url}/Groups?filter=displayName eq "{escape_scim_filter_value(group_name)}"'
-    resp = requests.get(url, headers=headers)
+    resp = requests.get(url, headers=headers, timeout=SCIM_TIMEOUT)
 
     if resp.status_code != 200:
         raise RuntimeError(f"SCIM group search failed: {resp.status_code} {resp.text}")
@@ -70,11 +70,8 @@ def find_scim_group(base_url, group_name, headers):
 
 def create_scim_group(base_url, group_name, headers):
     base_url = base_url.rstrip("/")
-    body = {
-        "displayName": group_name,
-        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"]
-    }
-    resp = requests.post(f"{base_url}/Groups", headers=headers, json=body)
+    body = {"displayName": group_name, "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"]}
+    resp = requests.post(f"{base_url}/Groups", headers=headers, json=body, timeout=SCIM_TIMEOUT)
 
     if resp.status_code not in (200, 201):
         raise RuntimeError(f"SCIM group create failed: {resp.status_code} {resp.text}")
@@ -94,15 +91,9 @@ def sync_groups_for_user(user_id, user_groups, scim_base_url, headers):
         # 2. Add user to group
         patch_body = {
             "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-            "Operations": [
-                {
-                    "op": "add",
-                    "path": "members",
-                    "value": [{"value": user_id}]
-                }
-            ]
+            "Operations": [{"op": "add", "path": "members", "value": [{"value": user_id}]}],
         }
-        requests.patch(f"{scim_base_url}/Groups/{group_id}", headers=headers, json=patch_body)
+        requests.patch(f"{scim_base_url}/Groups/{group_id}", headers=headers, json=patch_body, timeout=SCIM_TIMEOUT)
 
 
 def build_user_info(claims):
@@ -111,12 +102,7 @@ def build_user_info(claims):
         "userName": claims.get("email"),
         "externalId": claims.get("sub"),
         "active": True,
-        "emails": [
-            {
-                "value": claims.get("email"),
-                "type": "work"
-            }
-        ]
+        "emails": [{"value": claims.get("email"), "type": "work"}],
     }
 
     displayName = claims.get("display_name", None)
