@@ -3,7 +3,8 @@ set -euo pipefail
 
 cd src/
 
-rm ../dist/*.zip || echo "No ZIPs to delete"
+mkdir -p ../dist
+rm -f ../dist/*.zip || echo "No ZIPs to delete"
 rm -rf .target || echo "No .target/ to delete"
 mkdir .target
 
