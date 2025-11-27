@@ -6,6 +6,7 @@ These tests are CRITICAL as they cover security-sensitive signing operations.
 import base64
 from unittest.mock import MagicMock, patch
 
+import pytest
 from freezegun import freeze_time
 from lxml import etree
 
@@ -23,56 +24,22 @@ class TestFetchCertAndKey:
         assert cert == test_keypair["certificate"]
         mock_secrets_manager.get_secret_value.assert_called_once()
 
-    def test_generates_new_keypair_when_secret_not_found(self):
-        """Should generate and store new keypair when ResourceNotFoundException."""
+    def test_raises_when_secret_not_found(self):
+        """Should raise exception when secret doesn't exist (Terraform creates it)."""
+        from botocore.exceptions import ClientError
+
         with patch("shim_saml.boto3") as mock_boto3:
             mock_sm = MagicMock()
             mock_boto3.client.return_value = mock_sm
 
-            # Create proper exception class
-            class ResourceNotFoundException(Exception):
-                pass
-
-            class ResourceExistsException(Exception):
-                pass
-
-            mock_sm.exceptions.ResourceNotFoundException = ResourceNotFoundException
-            mock_sm.exceptions.ResourceExistsException = ResourceExistsException
-            mock_sm.get_secret_value.side_effect = ResourceNotFoundException("Not found")
+            # Simulate secret not found with proper AWS exception
+            error_response = {"Error": {"Code": "ResourceNotFoundException", "Message": "Secret not found"}}
+            mock_sm.get_secret_value.side_effect = ClientError(error_response, "GetSecretValue")
 
             from shim_saml import fetch_cert_and_key
 
-            key, cert = fetch_cert_and_key("new-secret", "test.example.com")
-
-            # Should have created secret
-            assert mock_sm.create_secret.called or mock_sm.put_secret_value.called
-            assert "BEGIN" in key and "PRIVATE KEY" in key
-            assert "BEGIN CERTIFICATE" in cert
-
-    def test_handles_corrupted_secret_gracefully(self):
-        """Should regenerate when secret JSON is malformed."""
-        with patch("shim_saml.boto3") as mock_boto3:
-            mock_sm = MagicMock()
-            mock_boto3.client.return_value = mock_sm
-
-            class ResourceNotFoundException(Exception):
-                pass
-
-            class ResourceExistsException(Exception):
-                pass
-
-            mock_sm.exceptions.ResourceNotFoundException = ResourceNotFoundException
-            mock_sm.exceptions.ResourceExistsException = ResourceExistsException
-            mock_sm.get_secret_value.return_value = {"SecretString": "not-valid-json"}
-
-            from shim_saml import fetch_cert_and_key
-
-            key, cert = fetch_cert_and_key("bad-secret", "localhost")
-
-            # Should regenerate valid keypair
-            assert key is not None
-            assert cert is not None
-            assert "BEGIN" in key
+            with pytest.raises(ClientError):
+                fetch_cert_and_key("missing-secret", "test.example.com")
 
 
 class TestBuildSamlResponse:

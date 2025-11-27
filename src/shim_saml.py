@@ -1,16 +1,11 @@
 import base64
 import json
-import os
 import re
 import secrets
 from datetime import datetime, timedelta
 from html import escape as html_escape
 
 import boto3
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import NameOID
 from lxml import etree
 from signxml import XMLSigner, methods
 
@@ -24,87 +19,13 @@ NSMAP = {
 
 def fetch_cert_and_key(secret_name: str, host: str):
     """
-    Fetch an IdP signing keypair from Secrets Manager.
-    If it does not exist (or is invalid), generate a new RSA key and self-signed cert,
-    store them, and return (private_key_pem, cert_pem).
+    Fetch IdP signing keypair from Secrets Manager.
+    The keypair is created by Terraform, not at runtime.
     """
     sm = boto3.client("secretsmanager")
-
-    # 1. Try to read existing secret
-    try:
-        resp = sm.get_secret_value(SecretId=secret_name)
-        if "SecretString" in resp:
-            data = json.loads(resp["SecretString"])
-            priv = data["private_key_pem"]
-            cert = data["cert_pem"]
-            return priv, cert
-    except sm.exceptions.ResourceNotFoundException:
-        # First run: secret not there – fall through to generate
-        pass
-    except Exception as e:
-        # If secret is corrupt or not parseable, log and regenerate
-        jprint(f"Error reading secret {secret_name}, regenerating: {e}")
-
-    # 2. Generate new RSA keypair
-    key = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=2048,
-    )
-
-    private_key_pem = key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    ).decode("ascii")
-
-    # 3. Build a self-signed cert
-    now = datetime.utcnow()
-    subject = issuer = x509.Name(
-        [
-            x509.NameAttribute(NameOID.COUNTRY_NAME, "GB"),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Shim IdP"),
-            x509.NameAttribute(NameOID.COMMON_NAME, os.getenv("IDP_COMMON_NAME", host)),
-        ]
-    )
-
-    cert = (
-        x509.CertificateBuilder()
-        .subject_name(subject)
-        .issuer_name(issuer)
-        .public_key(key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(now - timedelta(minutes=5))
-        .not_valid_after(now + timedelta(days=3650))  # ~10 years
-        .add_extension(
-            x509.BasicConstraints(ca=False, path_length=None),
-            critical=True,
-        )
-        .sign(private_key=key, algorithm=hashes.SHA256())
-    )
-
-    cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode("ascii")
-
-    # 4. Store in Secrets Manager as JSON
-    secret_value = json.dumps(
-        {
-            "private_key_pem": private_key_pem,
-            "cert_pem": cert_pem,
-        }
-    )
-
-    try:
-        sm.create_secret(
-            Name=secret_name,
-            SecretString=secret_value,
-        )
-    except sm.exceptions.ResourceExistsException:
-        # Race / previous run created it already – just put a new version
-        sm.put_secret_value(
-            SecretId=secret_name,
-            SecretString=secret_value,
-        )
-
-    return private_key_pem, cert_pem
+    resp = sm.get_secret_value(SecretId=secret_name)
+    data = json.loads(resp["SecretString"])
+    return data["private_key_pem"], data["cert_pem"]
 
 
 def get_saml_metadata(login_url, logout_url, idp_entity_id, NAMEID_FORMAT, secret_name: str, host: str):
