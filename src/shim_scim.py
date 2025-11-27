@@ -2,6 +2,17 @@ import requests
 
 from shim_utils import jprint
 
+
+def escape_scim_filter_value(value: str) -> str:
+    """
+    SECURITY: Escape special characters in SCIM filter values to prevent filter injection.
+    SCIM filter values need backslash and double-quote escaped.
+    """
+    if not value:
+        return value
+    return value.replace('\\', '\\\\').replace('"', '\\"')
+
+
 def push_user_info_to_scim(base_url, access_token, claims):
     base_url = base_url.rstrip("/")
     headers = {
@@ -14,8 +25,8 @@ def push_user_info_to_scim(base_url, access_token, claims):
     if not email:
         raise ValueError("SCIM user must have an email")
 
-    # Look up existing user
-    search_url = f'{base_url}/Users?filter=emails.value eq "{email}"'
+    # Look up existing user (escape email for SCIM filter injection prevention)
+    search_url = f'{base_url}/Users?filter=emails.value eq "{escape_scim_filter_value(email)}"'
     search = requests.get(search_url, headers=headers)
 
     if search.status_code != 200:
@@ -46,8 +57,8 @@ def push_user_info_to_scim(base_url, access_token, claims):
 
 def find_scim_group(base_url, group_name, headers):
     base_url = base_url.rstrip("/")
-    # SCIM filter query by displayName
-    url = f'{base_url}/Groups?filter=displayName eq "{group_name}"'
+    # SCIM filter query by displayName (escape for SCIM filter injection prevention)
+    url = f'{base_url}/Groups?filter=displayName eq "{escape_scim_filter_value(group_name)}"'
     resp = requests.get(url, headers=headers)
 
     if resp.status_code != 200:

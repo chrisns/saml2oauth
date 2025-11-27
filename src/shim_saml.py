@@ -3,7 +3,8 @@ import os
 import boto3
 import base64
 import re
-import time
+import secrets
+from html import escape as html_escape
 
 from datetime import datetime, timedelta
 from lxml import etree
@@ -152,31 +153,37 @@ def build_saml_response(idp_cert, idp_key, SP_ACS_URL, SP_ENTITY_ID, NAMEID_FORM
 
     attrs_xml = ""
 
+    # SECURITY: Escape all claim values to prevent XML injection
     if email:
-        attrs_xml += f'<saml2:Attribute Name="email"><saml2:AttributeValue>{email}</saml2:AttributeValue></saml2:Attribute>'
-        attrs_xml += f'<saml2:Attribute Name="mail"><saml2:AttributeValue>{email}</saml2:AttributeValue></saml2:Attribute>'
-        attrs_xml += f'<saml2:Attribute Name="https://aws.amazon.com/SAML/Attributes/RoleSessionName"><saml2:AttributeValue>{email}</saml2:AttributeValue></saml2:Attribute>'
+        email_escaped = html_escape(email)
+        attrs_xml += f'<saml2:Attribute Name="email"><saml2:AttributeValue>{email_escaped}</saml2:AttributeValue></saml2:Attribute>'
+        attrs_xml += f'<saml2:Attribute Name="mail"><saml2:AttributeValue>{email_escaped}</saml2:AttributeValue></saml2:Attribute>'
+        attrs_xml += f'<saml2:Attribute Name="https://aws.amazon.com/SAML/Attributes/RoleSessionName"><saml2:AttributeValue>{email_escaped}</saml2:AttributeValue></saml2:Attribute>'
 
     name = claims.get("display_name")
     if name:
-        attrs_xml += f'<saml2:Attribute Name="name"><saml2:AttributeValue>{name}</saml2:AttributeValue></saml2:Attribute>'
-        attrs_xml += f'<saml2:Attribute Name="displayName"><saml2:AttributeValue>{name}</saml2:AttributeValue></saml2:Attribute>'
+        name_escaped = html_escape(name)
+        attrs_xml += f'<saml2:Attribute Name="name"><saml2:AttributeValue>{name_escaped}</saml2:AttributeValue></saml2:Attribute>'
+        attrs_xml += f'<saml2:Attribute Name="displayName"><saml2:AttributeValue>{name_escaped}</saml2:AttributeValue></saml2:Attribute>'
 
     given_name = claims.get("given_name")
     if given_name:
-        attrs_xml += f'<saml2:Attribute Name="givenName"><saml2:AttributeValue>{given_name}</saml2:AttributeValue></saml2:Attribute>'
+        given_name_escaped = html_escape(given_name)
+        attrs_xml += f'<saml2:Attribute Name="givenName"><saml2:AttributeValue>{given_name_escaped}</saml2:AttributeValue></saml2:Attribute>'
 
     family_name = claims.get("family_name")
     if family_name:
-        attrs_xml += f'<saml2:Attribute Name="surname"><saml2:AttributeValue>{family_name}</saml2:AttributeValue></saml2:Attribute>'
+        family_name_escaped = html_escape(family_name)
+        attrs_xml += f'<saml2:Attribute Name="surname"><saml2:AttributeValue>{family_name_escaped}</saml2:AttributeValue></saml2:Attribute>'
 
     groups = claims.get("groups") or []
     if groups:
-        group_values = "".join(f'<saml2:AttributeValue>{g}</saml2:AttributeValue>' for g in groups)
+        group_values = "".join(f'<saml2:AttributeValue>{html_escape(g)}</saml2:AttributeValue>' for g in groups)
         attrs_xml += f'<saml2:Attribute Name="groups">{group_values}</saml2:Attribute>'
 
-    response_id = f"_shim_{int(time.time())}"
-    assertion_id = f"_assert_{int(time.time())}"
+    # SECURITY: Use cryptographically random IDs instead of predictable timestamps
+    response_id = f"_shim_{secrets.token_urlsafe(16)}"
+    assertion_id = f"_assert_{secrets.token_urlsafe(16)}"
 
     root_assertion_xml = f"""<saml2p:Response
     xmlns:saml2p="{NSMAP['saml2p']}"
@@ -187,7 +194,7 @@ def build_saml_response(idp_cert, idp_key, SP_ACS_URL, SP_ENTITY_ID, NAMEID_FORM
         <saml2:Issuer>{issuer}</saml2:Issuer>
         <ds:Signature Id="placeholder"></ds:Signature>
         <saml2:Subject>
-            <saml2:NameID Format="{NAMEID_FORMAT}">{email}</saml2:NameID>
+            <saml2:NameID Format="{NAMEID_FORMAT}">{html_escape(email) if email else ''}</saml2:NameID>
             <saml2:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
                 <saml2:SubjectConfirmationData {in_response_to_attr}
                     NotOnOrAfter="{expiry.isoformat()}Z"

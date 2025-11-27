@@ -19,7 +19,9 @@ from shim_scim import push_user_info_to_scim
 app = Flask(__name__)
 
 ENVIRONMENT = os.getenv('ENVIRONMENT', 'prod')
-FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY", secrets.token_urlsafe(24))
+# SECURITY: SECRET_KEY must be provided via environment for session persistence across Lambda cold starts
+# In local dev, generate a random one; in production, Terraform provides it
+FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY") or secrets.token_urlsafe(24)
 IS_PROD = ENVIRONMENT.lower().startswith("prod")
 DEBUG = not IS_PROD
 IS_HTTPS = os.getenv("IS_HTTPS", "f").lower()[0] in ["t", "1"]
@@ -210,7 +212,8 @@ def route_saml_response(signed_in=False, claims=None):
 
 
 def build_auto_post_html(acs_url, saml_response, relay_state=None):
-    relay_state_html = f"""<input type="hidden" name="RelayState" value="{relay_state}" />""" if relay_state else ""
+    # SECURITY: Escape relay_state to prevent XSS attacks
+    relay_state_html = f"""<input type="hidden" name="RelayState" value="{html.escape(relay_state)}" />""" if relay_state else ""
     return f"""<html>
   <body onload="document.forms[0].submit()">
     <form method="post" action="{acs_url}">
